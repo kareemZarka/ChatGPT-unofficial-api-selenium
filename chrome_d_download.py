@@ -1,182 +1,119 @@
-from sys import platform
-import subprocess, requests, os
-import requests, xml.etree.ElementTree as ET
-try:
-    import selenium
-except ModuleNotFoundError:
-    print("No selenium found, Installing selenium, Please Wait!!!")
-    if platform == "linux":
-        subprocess.call("pip3 install selenium", shell=True)
-    if platform == "darwin":
-        subprocess.call("pip3 install selenium", shell=True)
-    if platform == "win32":
-        subprocess.call("pip install selenium", shell=True)
+import subprocess
+import requests
+import os
+import zipfile
+import shutil
 
-curPlt = platform
-# https://googlechromelabs.github.io/chrome-for-testing/known-good-versions-with-downloads.json - download -> chrome -> {versions}
-version_dict = {'linux':0,
-                'darwin':2,
-                'win32':4
-                } # need to improve this
+# === Step 1: Function to get installed Chrome version ===
+def get_installed_chrome_version():
+    """Returns the installed Google Chrome version on macOS."""
+    try:
+        result = subprocess.run(
+            ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "--version"],
+            capture_output=True, text=True, check=True
+        )
+        return result.stdout.strip().split(" ")[2]  # Extract version number
+    except subprocess.CalledProcessError:
+        print("[-] Error: Google Chrome is not installed or cannot be found.")
+        exit(1)
 
-def front_version_extractor(vrsn):
-    vrsn = str(vrsn).split(".")
-    n_version = ""
-    for i in range(len(vrsn)-1):
-        n_version+=vrsn[i]
-    return n_version
+# === Step 2: Fetch the latest Chromedriver version from Google API ===
+def get_latest_chromedriver_version(chrome_version):
+    """Fetch the latest stable Chromedriver version matching the installed Chrome version."""
+    major_version = chrome_version.split(".")[0]  # Extract major version (e.g., 132)
+    url = "https://googlechromelabs.github.io/chrome-for-testing/known-good-versions-with-downloads.json"
 
-def get_download_version(c_version):
-    r = requests.get("https://chromedriver.storage.googleapis.com/?delimiter=/&prefix=")
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        data = response.json()
 
-    version_info = ET.fromstring(r.content)
+        # Find the closest matching Chromedriver version
+        available_versions = [entry["version"] for entry in data["versions"] if entry["version"].startswith(major_version)]
+        if not available_versions:
+            print(f"[-] No matching Chromedriver found for Chrome {chrome_version}")
+            exit(1)
 
-    for i in version_info.iter('{http://doc.s3.amazonaws.com/2006-03-01}Prefix'):
-        curr_version = i.text
-        if curr_version != None:
-            if front_version_extractor(c_version) == front_version_extractor(curr_version):
-                return str(curr_version[:-1])
-            else:
-                return str(c_version)
-    
-def json_version_extractor(vrsn):
-    r = requests.get("https://googlechromelabs.github.io/chrome-for-testing/known-good-versions-with-downloads.json")
-    data = r.json()
+        closest_version = max(available_versions)  # Get the highest available version
+        return closest_version
 
-    for i in data['versions']:
-        curr_version = i['version']
-    
-        if curr_version != None:
-            if front_version_extractor(vrsn) == front_version_extractor(curr_version):
-                down_link = i['downloads']['chromedriver'][version_dict[curPlt]]['url']
-                return (str(curr_version), down_link)
+    except requests.exceptions.RequestException as e:
+        print(f"[-] Error fetching latest Chromedriver version: {e}")
+        exit(1)
 
-def versionChk():
-    chrome_version  = subprocess.run(['google-chrome',' --version'], capture_output=True).stdout.decode().split(" ")[2] # chrome version check
-    chrome_driver_version = subprocess.run(['./chromedriver',' --version'], capture_output=True).stdout.decode().split(" ")[1] # chromeDriver check
-    print(get_download_version(chrome_version), get_download_version(chrome_driver_version))
-    return get_download_version(chrome_version) == get_download_version(chrome_driver_version)
-    
+# === Step 3: Download the Chromedriver ZIP ===
+def download_file(url, save_path):
+    """Downloads the file and ensures it's valid."""
+    try:
+        print(f"[+] Downloading: {url}")
+        response = requests.get(url, stream=True)
+        response.raise_for_status()
 
-# todl = subprocess.run(['google-chrome',' --version'], capture_output=True).stdout.decode()
-# vrsn  = (todl.split(" "))[2]
-# print(vrsn)
+        with open(save_path, "wb") as file:
+            for chunk in response.iter_content(chunk_size=8192):
+                file.write(chunk)
 
-# print(json_version_extractor(vrsn))
-# print(get_download_version('115.0.5763.0'))
+        print(f"[+] File downloaded: {save_path}")
 
+        # Verify if file is actually a ZIP
+        if not zipfile.is_zipfile(save_path):
+            print("[-] Error: The downloaded file is not a valid ZIP. Retrying...")
+            os.remove(save_path)
+            return False
+        return True
 
+    except requests.exceptions.RequestException as e:
+        print(f"[-] Download Error: {e}")
+        return False
+
+# === Step 4: Extract and Install Chromedriver ===
+def extract_and_setup_chromedriver(zip_path):
+    """Extracts the Chromedriver and moves it to the correct location."""
+    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+        zip_ref.extractall("chromeDriver_zips")
+
+    extracted_folder = "chromeDriver_zips/chromedriver-mac-x64"
+    chromedriver_path = f"{extracted_folder}/chromedriver"
+
+    if os.path.exists(chromedriver_path):
+        shutil.move(chromedriver_path, "chromeDriver_zips/chromedriver")
+        os.chmod("chromeDriver_zips/chromedriver", 0o755)  # Make it executable
+        shutil.rmtree(extracted_folder)  # Clean up extracted folder
+        print("[+] Chromedriver installed and set up successfully.")
+    else:
+        print("[-] Extraction failed! Chromedriver not found.")
+        exit(1)
+
+# === Step 5: Main Function to Install Chromedriver ===
 def chromeDriverDownloader():
-    if curPlt == 'linux':
-        print("[+] Detected System: Linux")
-        if not os.path.exists('./chromedriver'):
-            try:
-                todl = subprocess.run(['google-chrome',' --version'], capture_output=True).stdout.decode()
-                vrsn  = (todl.split(" "))[2]
+    print("[+] Detected System: Apple Mac")
 
-                if front_version_extractor(vrsn) == front_version_extractor("115.0.5762.4"):
-                    print("[-]Error Found: manual download required, please download it or update your chrome version!!")
-                    exit(0)
+    # Get installed Chrome version
+    chrome_version = get_installed_chrome_version()
+    print(f"[+] Installed Chrome version: {chrome_version}")
 
-                if front_version_extractor(vrsn) < front_version_extractor("115.0.5763.0"):
-                    print("Downloading Chromedriver for your system of version:",get_download_version(vrsn))
-                    url = "https://chromedriver.storage.googleapis.com/"+get_download_version(vrsn)+"/chromedriver_linux64.zip"
-                    r = requests.get(url, allow_redirects=True)
-                    
-                    if "chromeDriver_zips" not in os.listdir():
-                        print("Creating chromeDriver_zips folder")
-                        os.mkdir("chromeDriver_zips")
+    # Get matching Chromedriver version
+    driver_version = get_latest_chromedriver_version(chrome_version)
+    print(f"[+] Downloading Chromedriver version: {driver_version}")
 
-                    open("chromeDriver_zips/chromedriver_linux64.zip","wb").write(r.content)
-                else: # if version > 115.x.x.x
-                    print("Downloading Chromedriver for your system of version:",json_version_extractor(vrsn)[0])
-                    url = json_version_extractor(vrsn)[1]
-                    r = requests.get(url, allow_redirects=True)
-                    
-                    if "chromeDriver_zips" not in os.listdir():
-                        print("Creating chromeDriver_zips folder")
-                        os.mkdir("chromeDriver_zips")
+    # Construct the correct URL
+    download_url = f"https://edgedl.me.gvt1.com/edgedl/chrome/chrome-for-testing/{driver_version}/mac-x64/chromedriver-mac-x64.zip"
+    save_path = "chromeDriver_zips/chromedriver_mac64.zip"
 
-                    open("chromeDriver_zips/chromedriver_linux64.zip","wb").write(r.content)
-            except FileNotFoundError as fnf:
-                print("[-]Error Found:",fnf)
-                print("[+] Google Chrome is not installed, Please install it!! - https://www.google.com/chrome/")
-                exit(0)
-            except Exception as e:
-                print("[-]Error Found:",e)
-                exit(0)
-        else:
-            if versionChk():
-                print("[+] 'Google Chrome' and 'Chromedriver' Version Matched!!")
-            else:
-                # print("[-] chromedriver version not matched, please install it - https://chromedriver.chromium.org/") # rare case
-                print("Removing old chromedrivers!")
-                subprocess.run(['rm','chromedriver'])
-                subprocess.run(['rm','-rf','chromeDriver_zips'])
-                subprocess.run(['mkdir','chromeDriver_zips'])
-                chromeDriverDownloader()
-    if curPlt == 'darwin':
-        print("[+] Detected System: Apple Mac")
-        if not os.path.exists('./chromedriver'):
-            try:
-                todl = subprocess.run(['google-chrome',' --version'], capture_output=True).stdout.decode()
-                vrsn  = (todl.split(" "))[2]
-                print("Downloading Chromedriver for your system of version:",get_download_version(vrsn))
-                url = "https://chromedriver.storage.googleapis.com/"+get_download_version(vrsn)+"/chromedriver_mac64.zip"
-                r = requests.get(url, allow_redirects=True)
-                
-                if "chromeDriver_zips" not in os.listdir():
-                    print("Creating chromeDriver_zips folder")
-                    os.mkdir("chromeDriver_zips")
+    # Ensure download folder exists
+    if not os.path.exists("chromeDriver_zips"):
+        os.mkdir("chromeDriver_zips")
 
-                open("chromeDriver_zips/chromedriver_mac64.zip","wb").write(r.content)
-            except FileNotFoundError as fnf:
-                print("[-]Error Found:",fnf)
-                print("[+] Google Chrome is not installed, Please install it!! - https://www.google.com/chrome/")
-                exit(0)
-        else:
-            if versionChk():
-                print("'Google Chrome' and 'Chromedriver' Version Matched!!")
-            else:
-                # print("[-] chromedriver version not matched, please install it - https://chromedriver.chromium.org/") # rare case
-                print("Removing old chromedrivers!")
-                subprocess.run(['rm','chromedriver'])
-                subprocess.run(['rm','-rf','chromeDriver_zips'])
-                subprocess.run(['mkdir','chromeDriver_zips'])
-                chromeDriverDownloader()
-    if curPlt == 'win32':
-        print("[+] Detected System: Windows")
-        if not os.path.exists('./chromedriver'):
-            try:
-                todl = os.popen('reg query "HKEY_CURRENT_USER\Software\Google\Chrome\BLBeacon" /v version')
-                vrsn = todl.read().split(" ")[-1].strip()
-                print("Downloading Chromedriver for your system of version:",get_download_version(vrsn))
-                url = "https://chromedriver.storage.googleapis.com/"+get_download_version(vrsn)+"/chromedriver_win32.zip"
-                r = requests.get(url, allow_redirects=True)
+    # Download the Chromedriver ZIP
+    if not download_file(download_url, save_path):
+        print("[-] Failed to download a valid Chromedriver ZIP. Exiting.")
+        exit(1)
 
-                if "chromeDriver_zips" not in os.listdir():
-                    print("Creating chromeDriver_zips folder")
-                    os.mkdir("chromeDriver_zips")
+    # Extract and set up Chromedriver
+    extract_and_setup_chromedriver(save_path)
 
-                open("chromeDriver_zips/chromedriver_win32.zip","wb").write(r.content)
-            except FileNotFoundError as fnf:
-                print("[-]Error Found:",fnf)
-                print("[+] Google Chrome is not installed, Please install it!! - https://www.google.com/chrome/")
-                exit(0)
-        else:
-            if versionChk():
-                print("'Google Chrome' and 'Chromedriver' Version Matched!!")
-            else:
-                # print("[-] chromedriver version not matched, please install it - https://chromedriver.chromium.org/") # rare case
-                print("Removing old chromedrivers!")
-                subprocess.run(['del','chromedriver'])
-                subprocess.run(['rmdir','/S','/Q','chromeDriver_zips'])
-                subprocess.run(['mkdir','chromeDriver_zips'])
-                chromeDriverDownloader()
+    # Verify installation
+    os.system("chromeDriver_zips/chromedriver --version")
+
+# Run the function
 chromeDriverDownloader()
-
-subprocess.call
-
-print("Unzipping chromedriver")
-
-from unzipper import *

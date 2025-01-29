@@ -47,38 +47,47 @@ def make_gpt_request(text):
     time.sleep(1)
     text_area_xpath = "//*[@id='prompt-textarea']"
     helper_fn.wait_for_element(text_area_xpath)
+    
     if helper_fn.is_element_present(text_area_xpath):
         text_area = helper_fn.find_element(text_area_xpath)
         text_area.send_keys(text)
 
-        # send button
+        # Ensure ChatGPT tab is active
+        driver.switch_to.window(driver.current_window_handle)
+        driver.execute_script("window.focus();")
+
+        # Send button
         send_btn_xpath = "//*[@data-testid='send-button']"
-        
-        # Wait until the button with data-testid="send-button" is present
-        WebDriverWait(driver, 120).until(
-            EC.presence_of_element_located((By.XPATH, send_btn_xpath))
-        )
-        
+        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.XPATH, send_btn_xpath)))
+
         send_btn = helper_fn.find_element(send_btn_xpath)
         time.sleep(1)
         send_btn.click()
-
-    helper_fn.wait_for_x_seconds(5)
-    # waiting for response
-    response_xpath_light = "//*[@class='markdown prose w-full break-words dark:prose-invert light']" # for light mode
-    response_xpath_dark = "//*[@class='markdown prose w-full break-words dark:prose-invert dark']" # for dark mode
-    regenrate_xpath = '//*[@id="__next"]/div[1]/div[2]/main/div[1]/div[2]/div[1]/div/form/div/div[2]/div/div/button'
     
-    # Change this line to wait for send button instead of regenrate button
-    WebDriverWait(driver, 120).until(
-        EC.presence_of_element_located((By.XPATH, send_btn_xpath))
-    )
+    print("✅ Message sent! Waiting for response...")
 
-    response_xpath = response_xpath_dark if helper_fn.is_element_present(response_xpath_dark) else response_xpath_light # check for dark mode or light mode
-    if helper_fn.is_element_present(response_xpath):
-        helper_fn.wait_for_x_seconds(1)
-        response = helper_fn.find_elements(response_xpath)[-1]
-        return response.text # will return all the textual information under that particular xpath
+    # New XPath for detecting response
+    response_xpath = "//div[contains(@class, 'markdown prose')]"
+
+    try:
+        # Wait for ChatGPT response
+        WebDriverWait(driver, 60).until(EC.presence_of_element_located((By.XPATH, response_xpath)))
+        time.sleep(3)  # Small delay to ensure the response is complete
+
+        # Extract response
+        response_elements = driver.find_elements(By.XPATH, response_xpath)
+        if response_elements:
+            last_response = response_elements[-1]  # Get the latest response
+            print(f"✅ ChatGPT Response Retrieved: {last_response.text}")
+            return last_response.text
+        else:
+            print("⚠️ No response found in the expected location.")
+            return "No response detected."
+
+    except TimeoutException:
+        print("❌ Timeout: No response detected within 60 seconds.")
+        return "Response timeout."
+
 
 def make_gpt_request_and_copy(text):
     """
