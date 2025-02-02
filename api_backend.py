@@ -43,6 +43,12 @@ def start_chat_gpt():
 '''
 This function only returns raw text, with no formatting... For formatted markdown text, I've made make_gpt_request_and_copy() 
 '''
+import time
+from selenium.webdriver.common.keys import Keys
+
+import time
+from selenium.webdriver.common.keys import Keys
+
 def make_gpt_request(text):
     time.sleep(1)
     text_area_xpath = "//*[@id='prompt-textarea']"
@@ -66,27 +72,90 @@ def make_gpt_request(text):
     
     print("✅ Message sent! Waiting for response...")
 
-    # New XPath for detecting response
-    response_xpath = "//div[contains(@class, 'markdown prose')]"
+    response_xpath = "//div[contains(@class, 'prose') and contains(@class, 'w-full')]"
+    typing_indicator_xpath = "//div[contains(@class, 'result-streaming')]"
 
     try:
-        # Wait for ChatGPT response
-        WebDriverWait(driver, 60).until(EC.presence_of_element_located((By.XPATH, response_xpath)))
-        time.sleep(3)  # Small delay to ensure the response is complete
+        # Wait for response to start
+        WebDriverWait(driver, 30).until(
+            EC.presence_of_element_located((By.XPATH, response_xpath))
+        )
+        print("💬 ChatGPT started responding...")
 
-        # Extract response
-        response_elements = driver.find_elements(By.XPATH, response_xpath)
-        if response_elements:
-            last_response = response_elements[-1]  # Get the latest response
-            print(f"✅ ChatGPT Response Retrieved: {last_response.text}")
-            return last_response.text
-        else:
-            print("⚠️ No response found in the expected location.")
-            return "No response detected."
+        # Wait for typing indicator to disappear
+        WebDriverWait(driver, 180).until_not(
+            EC.presence_of_element_located((By.XPATH, typing_indicator_xpath))
+        )
+        print("✅ ChatGPT response completed.")
+
+        # Poll response text until it's fully loaded
+        previous_text = ""
+        max_wait_time = 30  # Maximum time to wait for response stability
+        elapsed_time = 0
+
+        while elapsed_time < max_wait_time:
+            response_elements = driver.find_elements(By.XPATH, response_xpath)
+            if response_elements:
+                current_text = response_elements[-1].text.strip()
+                if current_text and current_text == previous_text:
+                    print("✅ Response stabilized. Retrieving final output.")
+                    return current_text
+                previous_text = current_text
+            time.sleep(2)
+            elapsed_time += 2
+
+        print("⚠️ Response may be incomplete but retrieving last available output.")
+        return previous_text if previous_text else "No response detected."
 
     except TimeoutException:
-        print("❌ Timeout: No response detected within 60 seconds.")
+        print("❌ Timeout: No response detected within 180 seconds.")
         return "Response timeout."
+
+
+# def make_gpt_request(text):
+#     time.sleep(1)
+#     text_area_xpath = "//*[@id='prompt-textarea']"
+#     helper_fn.wait_for_element(text_area_xpath)
+    
+#     if helper_fn.is_element_present(text_area_xpath):
+#         text_area = helper_fn.find_element(text_area_xpath)
+#         text_area.send_keys(text)
+
+#         # Ensure ChatGPT tab is active
+#         driver.switch_to.window(driver.current_window_handle)
+#         driver.execute_script("window.focus();")
+
+#         # Send button
+#         send_btn_xpath = "//*[@data-testid='send-button']"
+#         WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.XPATH, send_btn_xpath)))
+
+#         send_btn = helper_fn.find_element(send_btn_xpath)
+#         time.sleep(1)
+#         send_btn.click()
+    
+#     print("✅ Message sent! Waiting for response...")
+
+#     # New XPath for detecting response
+#     response_xpath = "//div[contains(@class, 'markdown prose')]"
+
+#     try:
+#         # Wait for ChatGPT response
+#         WebDriverWait(driver, 500).until(EC.presence_of_element_located((By.XPATH, response_xpath)))
+#         time.sleep(3)  # Small delay to ensure the response is complete
+
+#         # Extract response
+#         response_elements = driver.find_elements(By.XPATH, response_xpath)
+#         if response_elements:
+#             last_response = response_elements[-1]  # Get the latest response
+#             print(f"✅ ChatGPT Response Retrieved: {last_response.text}")
+#             return last_response.text
+#         else:
+#             print("⚠️ No response found in the expected location.")
+#             return "No response detected."
+
+#     except TimeoutException:
+#         print("❌ Timeout: No response detected within 60 seconds.")
+#         return "Response timeout."
 
 
 def make_gpt_request_and_copy(text):
